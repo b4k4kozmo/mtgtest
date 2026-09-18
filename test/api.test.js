@@ -270,3 +270,101 @@ test('deck pricing falls back to the full print run when the cheap page is empty
     local.close();
   }
 });
+
+/* ── Shipping ───────────────────────────────────────────────────────────── */
+
+test('GET /api/card includes shipping in the price by default', async () => {
+  const { body } = await get('/api/card?q=Lightning%20Bolt&shippingPerOrder=1.29&shippingFreeOver=5');
+  const cheapest = body.pricing.cheapest;
+  assert.equal(cheapest.price, 1.2, 'the card price is untouched');
+  assert.equal(cheapest.shipping, 1.29);
+  assert.equal(cheapest.landedPrice, 2.49);
+  assert.equal(cheapest.shippingIsEstimate, true, 'and it is labelled an estimate');
+});
+
+test('GET /api/card can turn shipping off', async () => {
+  const { body } = await get('/api/card?q=Lightning%20Bolt&shipping=false');
+  assert.equal(body.pricing.shipping, null);
+  assert.equal(body.pricing.cheapest.landedPrice, 1.2);
+  assert.equal(body.pricing.cheapest.shippingIsEstimate, false);
+});
+
+test('a free-shipping threshold reorders results by what you actually pay', async () => {
+  // With free shipping over $2, the $1.85 A25 printing costs $1.85 delivered
+  // while the $1.20 CLB printing costs $1.20 + $5.00 = $6.20.
+  const { body } = await get('/api/card?q=Lightning%20Bolt&shippingPerOrder=5&shippingFreeOver=1.5');
+  const cheapest = body.pricing.cheapest;
+  assert.equal(cheapest.printing.set, 'A25');
+  assert.equal(cheapest.price, 1.85);
+  assert.equal(cheapest.shipping, 0);
+  assert.equal(cheapest.shippingFree, true);
+  assert.equal(cheapest.landedPrice, 1.85);
+});
+
+test('POST /api/deck charges shipping per order, not per card', async () => {
+  const list = '1 Fire // Ice'; // $0.75, under any sane threshold
+  const one = await post('/api/deck', { list, shippingPerOrder: 1.29, shippingFreeOver: 5, orders: 1 });
+  assert.equal(one.body.totals.cardsSubtotal, 0.75);
+  assert.equal(one.body.totals.shipping.estimate, 1.29);
+  assert.equal(one.body.totals.total, 2.04);
+
+  const three = await post('/api/deck', { list, shippingPerOrder: 1.29, shippingFreeOver: 5, orders: 3 });
+  assert.equal(three.body.totals.shipping.estimate, 3.87, 'three sellers, three shipping fees');
+  assert.equal(three.body.totals.total, 4.62);
+});
+
+test('POST /api/deck waives shipping when the order clears the threshold', async () => {
+  const { body } = await post('/api/deck', { list: '4 Lightning Bolt', shippingPerOrder: 1.29, shippingFreeOver: 5 });
+  assert.equal(body.totals.cardsSubtotal, 4.8);
+  assert.equal(body.totals.shipping.estimate, 1.29, '$4.80 is under the $5 threshold');
+
+  const bigger = await post('/api/deck', { list: '8 Lightning Bolt', shippingPerOrder: 1.29, shippingFreeOver: 5 });
+  assert.equal(bigger.body.totals.shipping.estimate, 0, '$9.60 clears it');
+  assert.equal(bigger.body.totals.total, bigger.body.totals.cardsSubtotal);
+});
+
+test('POST /api/deck can turn shipping off', async () => {
+  const { body } = await post('/api/deck', { list: '1 Fire // Ice', shipping: false });
+  assert.equal(body.totals.shipping, null);
+  assert.equal(body.totals.total, body.totals.cardsSubtotal);
+});
+
+test('GET /api/health advertises the shipping defaults it applies', async () => {
+  const { body } = await get('/api/health');
+  assert.ok(body.shipping.USD.perOrder > 0);
+  assert.ok('freeOver' in body.shipping.USD);
+  assert.match(body.shipping.note, /estimate/i);
+});
+
+/* ── Good deals ─────────────────────────────────────────────────────────── */
+
+test('GET /api/deals returns priced, buyable deals with art', async () => {
+  const { status, body } = await get('/api/deals?limit=5');
+  assert.equal(status, 200);
+  assert.ok(body.theme.label);
+  assert.ok(body.deals.length > 0 && body.deals.length <= 5);
+  for (const deal of body.deals) {
+    assert.ok(deal.offer.price > 0);
+    assert.ok(deal.offer.url.startsWith('https://'));
+    assert.ok(deal.images.normal, 'a deal without a picture is not much of a shop window');
+  }
+});
+
+test('GET /api/deals honours currency and a named theme', async () => {
+  const { body } = await get('/api/deals?currency=EUR&theme=pauper-power&limit=4');
+  assert.equal(body.theme.id, 'pauper-power');
+  assert.equal(body.currency, 'EUR');
+  assert.ok(body.deals.every((deal) => deal.offer.currency === 'EUR'));
+});
+
+test('GET /api/deals applies the shipping settings', async () => {
+  const { body } = await get('/api/deals?limit=5&shippingPerOrder=2&shippingFreeOver=100');
+  assert.ok(body.deals.every((deal) => deal.offer.shipping === 2));
+  assert.ok(body.deals.every((deal) => deal.offer.landedPrice === Number((deal.offer.price + 2).toFixed(2))));
+});
+
+test('GET /api/health lists the deal themes', async () => {
+  const { body } = await get('/api/health');
+  assert.ok(body.dealThemes.length >= 3);
+  assert.ok(body.dealThemes.every((theme) => theme.id && theme.label));
+});

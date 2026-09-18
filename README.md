@@ -10,6 +10,13 @@ No proxies. No counterfeits. No custom cards.
 
 ## What it does
 
+**Good deals strip**
+- A scrolling shelf of cards people actually play that are cheap right now,
+  rotating between Commander, Modern, Pauper, Legacy and cheap-mythic themes.
+- Where a card has a much pricier printing, the gap is shown — "99% under the
+  $1,400.00 printing" — measured from real prices, comparing like finish with
+  like finish.
+
 **Single card**
 - Fuzzy search with autocomplete (misspellings are fine).
 - The cheapest genuine printing, with a direct buy link.
@@ -23,6 +30,13 @@ No proxies. No counterfeits. No custom cards.
 - Main deck / sideboard / commander / maybeboard are tracked separately.
 - One-click **TCGplayer Mass Entry**, clipboard copy for any other store, and CSV export.
 - Anything that could not be resolved is listed explicitly — no card silently disappears.
+
+**Shipping**
+- Prices are shown delivered, not as a sticker price you cannot actually pay.
+- Free-shipping thresholds are respected, and they can change the answer: a
+  $5.20 card that ships free beats a $4.80 card that does not.
+- Deck orders pay shipping per order, not per card, with an adjustable number
+  of sellers.
 
 ---
 
@@ -38,7 +52,7 @@ Node 20+ is required. The app has one runtime dependency (Express); everything
 else is standard library.
 
 ```bash
-npm test     # 79 tests, no network access needed
+npm test     # 119 tests, no network access needed
 ```
 
 ---
@@ -52,7 +66,7 @@ npm test     # 79 tests, no network access needed
 | **eBay** | Real live listings: price, shipping, condition, seller rating, photo | eBay Browse API (optional, see below) |
 | **Card Kingdom / Star City Games / CoolStuffInc** | Deep link into their catalogue search | — |
 
-Two honesty rules the code follows:
+Three honesty rules the code follows:
 
 1. **A price is only ever shown when a real source provides it.** Stores with no
    public price API get a search link, never an invented number. The UI labels
@@ -60,10 +74,63 @@ Two honesty rules the code follows:
 2. **USD and EUR are never mixed.** Converting between them would need an
    exchange rate the app does not have, so "cheapest" is always computed inside
    the market you selected.
+3. **Estimated shipping is labelled as estimated, everywhere it appears.**
+   Only eBay publishes a real per-listing shipping cost, and that number flows
+   through untouched.
 
 Scryfall's [API guidelines](https://scryfall.com/docs/api) are respected: a
 descriptive `User-Agent`, a serialised request queue with ~110 ms spacing, retry
 with backoff on 429/5xx, and aggressive response caching.
+
+---
+
+## Shipping
+
+The cheapest sticker price is not the cheapest card, so shipping is included by
+default and the headline figure is what you pay delivered.
+
+| Vendor | Shipping |
+| --- | --- |
+| **eBay** | Real, per listing, straight from the Browse API — price + shipping is what the strip sorts by |
+| **TCGplayer / Cardmarket** | An **estimate** you control: a per-order cost and a free-over threshold |
+
+There is no public per-seller shipping quote for a given card at TCGplayer or
+Cardmarket, so the alternative to an editable estimate is an invented number
+presented as fact. The estimate is editable in the header (and remembered in
+your browser), overridable per deployment via `SHIPPING_PER_ORDER_*` /
+`SHIPPING_FREE_OVER_*`, and can be switched off entirely.
+
+Two details that matter:
+
+- **Thresholds reorder results.** With $1.29 shipping free over $5, a $4.80
+  card lands at $6.09 and a $5.20 card lands at $5.20 — so the pricier card
+  wins, and the ranking says so.
+- **Decks pay per order, not per card.** The deck total adds shipping once,
+  with a "separate orders" control for the realistic case where your list comes
+  from several sellers. The threshold is then applied per shipment, which is
+  how stores actually charge it.
+
+---
+
+## Good deals
+
+The deals strip is built from real data, not a curated list of favourites:
+
+1. Ask Scryfall for cards in a price band, sorted by EDHREC play rank, so the
+   pool is cards people genuinely play rather than cheap filler.
+2. Look up the true cheapest genuine printing of each (reusing the same
+   filtering and shipping rules as everything else).
+3. Where the same card also has a much pricier printing of the *same finish*,
+   report the gap. Finishes are compared like with like — a foil costing eight
+   times its non-foil twin is ordinary foil pricing, not a bargain, and quoting
+   it would overstate every saving on the page. The percentage is floored so it
+   never overstates.
+
+Themes rotate on load and on "Shuffle"; `GET /api/deals?theme=<id>` pins one.
+If Scryfall returns nothing, the strip simply does not render.
+
+The marquee pauses on hover and on keyboard focus, and under
+`prefers-reduced-motion` it becomes a plain scrollable row.
 
 ---
 
@@ -142,13 +209,17 @@ the page.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/health` | Price source, vendor registry, whether live listings are on |
+| `GET /api/health` | Price source, vendor registry, shipping defaults, deal themes, whether live listings are on |
+| `GET /api/deals?theme=&currency=&limit=` | The rotating good-deals strip |
 | `GET /api/autocomplete?q=` | Card-name suggestions |
 | `GET /api/card?q=&currency=&includeCollectibles=&finish=` | One card: every genuine printing, priced and ranked |
 | `GET /api/card?id=<scryfall-id>` | Same, for a specific printing |
 | `GET /api/search?q=` | Free-text card search (the "did you mean" list) |
 | `GET /api/listings?name=&set=&limit=` | Screened live marketplace listings |
 | `POST /api/deck` | `{ list, currency, includeCollectibles }` → priced deck |
+
+Every pricing endpoint also accepts `shipping` (`true`/`false`),
+`shippingPerOrder`, `shippingFreeOver` (blank for none) and `orders`.
 
 ---
 
@@ -165,11 +236,13 @@ server/
     vendors.js           vendor registry + proxy-filtered search URLs
     deckParser.js        deck list formats -> structured entries
     deckPricing.js       bulk resolve + price a whole list
+    shipping.js          shipping estimates, thresholds and per-order maths
+    deals.js             the rotating good-deals strip
     ebay.js              optional Browse API adapter
     cache.js             TTL cache with in-flight de-duplication
   routes/api.js          HTTP surface
 public/                  the front end (no build step, no framework)
-test/                    79 tests against Scryfall-shaped fixtures
+test/                    119 tests against Scryfall-shaped fixtures
 ```
 
 ---
@@ -183,6 +256,8 @@ test/                    79 tests against Scryfall-shaped fixtures
   the TCGplayer figure comes via Scryfall rather than a direct integration.
 - **Condition is not a filter for market prices.** Scryfall publishes one price
   per printing/finish, not one per condition grade.
+- **Shipping for TCGplayer and Cardmarket is your estimate, not a quote.** Real
+  cost varies by seller, quantity and destination. eBay's figure is real.
 - **Card Kingdom / SCG / CoolStuffInc are links, not prices,** for the reason in
   the honesty rules above.
 - This project was built in a sandbox where `api.scryfall.com` is blocked by

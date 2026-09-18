@@ -3,6 +3,8 @@ import { ScryfallError } from '../lib/scryfall.js';
 import { buildCardPricing, referenceLinksFor, printingSummary, SUPPORTED_CURRENCIES } from '../lib/offers.js';
 import { priceDeckList, MAX_DECK_ENTRIES } from '../lib/deckPricing.js';
 import { VENDORS } from '../lib/vendors.js';
+import { readShippingOptions, defaultShippingFor } from '../lib/shipping.js';
+import { findDeals, DEAL_THEMES } from '../lib/deals.js';
 
 const FINISHES = new Set(['any', 'nonfoil', 'foil', 'etched']);
 
@@ -20,11 +22,32 @@ export function createApiRouter({ scryfall, ebay }) {
       ok: true,
       priceSource: 'Scryfall (TCGplayer + Cardmarket daily price data)',
       liveListings: { ebay: ebay.configured },
+      shipping: {
+        USD: defaultShippingFor('USD'),
+        EUR: defaultShippingFor('EUR'),
+        note: 'Estimates you can edit. Only eBay reports a real per-listing shipping cost.',
+      },
+      dealThemes: DEAL_THEMES.map(({ id, label }) => ({ id, label })),
       vendors: Object.values(VENDORS).map(({ id, name, priority, kind, region, note }) => ({
         id, name, priority, kind, region, note,
       })),
     });
   });
+
+  /** A rotating strip of genuinely cheap cards that people actually play. */
+  router.get('/deals', asyncRoute(async (req, res) => {
+    const { currency, includeCollectibles } = readPricingOptions(req.query);
+    const shipping = readShippingOptions(req.query, currency);
+    const result = await findDeals({
+      scryfall,
+      currency,
+      shipping,
+      includeCollectibles,
+      limit: clampInt(req.query.limit, 16, 4, 30),
+      themeId: req.query.theme ? String(req.query.theme) : null,
+    });
+    res.json({ ...result, currency, shipping });
+  }));
 
   // Card-name suggestions for the search box.
   router.get('/autocomplete', asyncRoute(async (req, res) => {
@@ -39,6 +62,7 @@ export function createApiRouter({ scryfall, ebay }) {
    */
   router.get('/card', asyncRoute(async (req, res) => {
     const options = readPricingOptions(req.query);
+    options.shipping = readShippingOptions(req.query, options.currency);
     const card = req.query.id
       ? await scryfall.cardById(req.query.id)
       : await scryfall.named(req.query.q, { exact: req.query.exact === 'true' });
@@ -97,7 +121,8 @@ export function createApiRouter({ scryfall, ebay }) {
       return res.status(400).json({ error: 'Paste a deck list first.' });
     }
     const { currency, includeCollectibles } = readPricingOptions(req.body);
-    const result = await priceDeckList(list, { scryfall, currency, includeCollectibles });
+    const shipping = readShippingOptions(req.body, currency);
+    const result = await priceDeckList(list, { scryfall, currency, includeCollectibles, shipping });
     res.json({ ...result, maxEntries: MAX_DECK_ENTRIES });
   }));
 

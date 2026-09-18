@@ -1,5 +1,6 @@
 import { classifyPrinting } from './authenticity.js';
 import { VENDORS, buildEbaySearchUrl, buildSearchVendorLinks } from './vendors.js';
+import { shippingForSubtotal } from './shipping.js';
 
 const FINISH_META = {
   nonfoil: { label: 'Non-foil', rank: 0 },
@@ -74,7 +75,7 @@ function parsePrice(raw) {
  * Only finishes the printing was actually released in are considered, so a
  * stale `usd_foil` on a non-foil-only printing cannot leak through.
  */
-export function offersForPrinting(card, { currency = 'USD' } = {}) {
+export function offersForPrinting(card, { currency = 'USD', shipping = null } = {}) {
   const keys = PRICE_KEYS[currency];
   if (!keys) return [];
   const vendor = VENDORS[CURRENCY_VENDOR[currency]];
@@ -88,6 +89,7 @@ export function offersForPrinting(card, { currency = 'USD' } = {}) {
     const price = parsePrice(card.prices?.[key]);
     if (price === null) continue;
     if (!purchaseUri) continue;
+    const shippingCost = shippingForSubtotal(price, shipping ?? { enabled: false });
     offers.push({
       id: `${card.id}:${vendor.id}:${finish}`,
       vendorId: vendor.id,
@@ -97,6 +99,10 @@ export function offersForPrinting(card, { currency = 'USD' } = {}) {
       vendorKind: vendor.kind,
       priceKind: 'market',
       price,
+      shipping: shippingCost,
+      landedPrice: Number((price + shippingCost).toFixed(2)),
+      shippingFree: Boolean(shipping?.enabled) && shippingCost === 0,
+      shippingIsEstimate: Boolean(shipping?.enabled),
       currency,
       finish,
       finishLabel: FINISH_META[finish].label,
@@ -107,8 +113,14 @@ export function offersForPrinting(card, { currency = 'USD' } = {}) {
   return offers;
 }
 
+/** What a buyer actually pays: item plus shipping when shipping is switched on. */
+export const payable = (offer) => offer.landedPrice ?? offer.price;
+
 export function sortOffers(offers) {
   return [...offers].sort((a, b) => {
+    // Shipping can flip the order: a pricier card that ships free can be the
+    // cheaper one to get to your door.
+    if (payable(a) !== payable(b)) return payable(a) - payable(b);
     if (a.price !== b.price) return a.price - b.price;
     if (a.vendorPriority !== b.vendorPriority) return a.vendorPriority - b.vendorPriority;
     const rankA = FINISH_META[a.finish]?.rank ?? 9;
@@ -129,12 +141,12 @@ export function sortOffers(offers) {
  */
 export function similarlyPriced(sorted, { limit = 12, ratio = 1.6, floor = 1 } = {}) {
   if (sorted.length === 0) return [];
-  const cheapest = sorted[0].price;
+  const cheapest = payable(sorted[0]);
   const ceiling = Math.max(cheapest * ratio, cheapest + floor);
   const seenPrintings = new Set();
   const picks = [];
   for (const offer of sorted) {
-    if (offer.price > ceiling) break;
+    if (payable(offer) > ceiling) break;
     // One entry per printing keeps the gallery visually varied.
     if (seenPrintings.has(offer.printing.id)) continue;
     seenPrintings.add(offer.printing.id);
@@ -151,7 +163,7 @@ export function similarlyPriced(sorted, { limit = 12, ratio = 1.6, floor = 1 } =
  * @param {{ currency?: string, includeCollectibles?: boolean, finish?: string }} [options]
  */
 export function buildCardPricing(printings, options = {}) {
-  const { currency = 'USD', includeCollectibles = false, finish = 'any' } = options;
+  const { currency = 'USD', includeCollectibles = false, finish = 'any', shipping = null } = options;
   const kept = [];
   const excluded = [];
 
@@ -164,12 +176,13 @@ export function buildCardPricing(printings, options = {}) {
     kept.push(card);
   }
 
-  let offers = kept.flatMap((card) => offersForPrinting(card, { currency }));
+  let offers = kept.flatMap((card) => offersForPrinting(card, { currency, shipping }));
   if (finish !== 'any') offers = offers.filter((offer) => offer.finish === finish);
 
   const sorted = sortOffers(offers);
   return {
     currency,
+    shipping: shipping?.enabled ? { ...shipping } : null,
     cheapest: sorted[0] ?? null,
     offers: sorted,
     similar: similarlyPriced(sorted),

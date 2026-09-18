@@ -8,7 +8,8 @@ import { normalizeName } from '../../server/lib/deckPricing.js';
  */
 export function createFakeScryfall() {
   const catalogue = [...boltPrintings, splitCard, dfcCard];
-  const calls = { collection: 0, printingsByOracleIds: 0, cheapestPrintingsByOracleIds: 0, printingsByOracleId: 0 };
+  const calls = { collection: 0, printingsByOracleIds: 0, cheapestPrintingsByOracleIds: 0, printingsByOracleId: 0, searchCards: 0 };
+  let lastSearch = null;
 
   const printingsFor = (oracleId) => catalogue.filter((card) => card.oracle_id === oracleId);
   // Scryfall itself is lenient about punctuation and accents in names.
@@ -54,9 +55,26 @@ export function createFakeScryfall() {
         ]),
       );
     },
-    async searchCards(query) {
-      const q = normalize(query);
-      return catalogue.filter((c) => normalize(c.name).includes(q));
+    async searchCards(query, { unique = 'cards' } = {}) {
+      calls.searchCards += 1;
+      lastSearch = { query: String(query), unique };
+      const raw = String(query);
+      // A query using Scryfall operators (f:commander, usd>=0.25, ...) is a
+      // catalogue filter, not a name lookup.
+      const isOperatorQuery = /[:<>]/.test(raw);
+      const matches = isOperatorQuery
+        ? catalogue
+        : catalogue.filter((c) => normalize(c.name).includes(normalize(raw)));
+      if (unique !== 'cards') return matches;
+      const seen = new Set();
+      return matches.filter((c) => {
+        if (seen.has(c.oracle_id)) return false;
+        seen.add(c.oracle_id);
+        return true;
+      });
+    },
+    get lastSearch() {
+      return lastSearch;
     },
     async collection(identifiers) {
       calls.collection += 1;

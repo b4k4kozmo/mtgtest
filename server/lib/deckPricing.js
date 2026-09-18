@@ -1,5 +1,6 @@
 import { parseDeckList, toScryfallIdentifiers } from './deckParser.js';
 import { buildCardPricing, printingSummary, referenceLinksFor } from './offers.js';
+import { shippingForDeck } from './shipping.js';
 
 export const MAX_DECK_ENTRIES = 600;
 
@@ -7,7 +8,7 @@ export const MAX_DECK_ENTRIES = 600;
  * Price a pasted deck list: resolve every line to a real card, then find the
  * cheapest genuine printing of each.
  */
-export async function priceDeckList(text, { scryfall, currency = 'USD', includeCollectibles = false } = {}) {
+export async function priceDeckList(text, { scryfall, currency = 'USD', includeCollectibles = false, shipping = null } = {}) {
   const parsed = parseDeckList(text);
   const errors = [...parsed.errors];
 
@@ -22,7 +23,7 @@ export async function priceDeckList(text, { scryfall, currency = 'USD', includeC
   }
 
   if (entries.length === 0) {
-    return emptyResult(currency, errors, parsed);
+    return emptyResult(currency, errors, parsed, shipping);
   }
 
   const { found, notFound } = await scryfall.collection(toScryfallIdentifiers(entries));
@@ -49,6 +50,8 @@ export async function priceDeckList(text, { scryfall, currency = 'USD', includeC
     }
 
     let printings = printingsByOracleId.get(card.oracle_id) ?? [card];
+    // No per-card shipping here: a deck order pays shipping once, so it is
+    // added to the deck total instead of being baked into every line.
     let pricing = buildCardPricing(printings, { currency, includeCollectibles, finish: entry.finish });
 
     // The fast lookup keeps only the cheapest page; if everything on it was
@@ -118,11 +121,11 @@ export async function priceDeckList(text, { scryfall, currency = 'USD', includeC
     parse: { errors, totalCards: parsed.totalCards, sections: parsed.sections },
     cards,
     missing,
-    totals: summarise(cards, currency),
+    totals: summarise(cards, currency, shipping),
   };
 }
 
-function summarise(cards, currency) {
+function summarise(cards, currency, shipping) {
   let total = 0;
   let pricedCards = 0;
   let unpricedCards = 0;
@@ -143,9 +146,23 @@ function summarise(cards, currency) {
     }
   }
 
+  const cardsSubtotal = Number(total.toFixed(2));
+  const shippingEstimate = shipping?.enabled ? shippingForDeck(cardsSubtotal, shipping) : 0;
+
   return {
     currency,
-    total: Number(total.toFixed(2)),
+    cardsSubtotal,
+    shipping: shipping?.enabled
+      ? {
+          estimate: shippingEstimate,
+          perOrder: shipping.perOrder,
+          freeOver: shipping.freeOver ?? null,
+          orders: shipping.orders ?? 1,
+          isEstimate: true,
+        }
+      : null,
+    // What you actually pay, shipping included.
+    total: Number((cardsSubtotal + shippingEstimate).toFixed(2)),
     cardCount,
     pricedCards,
     unpricedCards,
@@ -212,7 +229,7 @@ export const normalizeName = (value) =>
 const setNumberKey = (set, collectorNumber) =>
   `${String(set ?? '').toLowerCase()}|${String(collectorNumber ?? '').toLowerCase()}`;
 
-function emptyResult(currency, errors, parsed) {
+function emptyResult(currency, errors, parsed, shipping = null) {
   return {
     currency,
     includeCollectibles: false,
@@ -221,6 +238,8 @@ function emptyResult(currency, errors, parsed) {
     missing: [],
     totals: {
       currency,
+      cardsSubtotal: 0,
+      shipping: shipping?.enabled ? { estimate: 0, perOrder: shipping.perOrder, freeOver: shipping.freeOver ?? null, orders: shipping.orders ?? 1, isEstimate: true } : null,
       total: 0,
       cardCount: 0,
       pricedCards: 0,

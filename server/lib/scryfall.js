@@ -175,12 +175,12 @@ export function createScryfallClient({
     },
 
     /** Free-text card search, used for the "did you mean" result list. */
-    async searchCards(query, { unique = 'cards', order = 'name', limit = 24 } = {}) {
+    async searchCards(query, { unique = 'cards', order = 'name', dir = 'auto', limit = 24 } = {}) {
       const q = String(query || '').trim();
       if (!q) return [];
-      const key = `search:${unique}:${order}:${q.toLowerCase()}`;
+      const key = `search:${unique}:${order}:${dir}:${q.toLowerCase()}`;
       const results = await cache.wrap(key, async () => {
-        const params = new URLSearchParams({ q, unique, order, dir: 'auto' });
+        const params = new URLSearchParams({ q, unique, order, dir });
         try {
           const page = await request(`/cards/search?${params.toString()}`);
           return page.data ?? [];

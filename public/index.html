@@ -31,6 +31,31 @@
           <option value="EUR">EUR · Cardmarket</option>
         </select>
       </label>
+      <details class="control shipping-control">
+        <summary id="shipping-summary">Shipping: on</summary>
+        <div class="shipping-panel">
+          <p class="shipping-note">
+            Only eBay publishes a real per-listing shipping cost. For the other stores this is an
+            <strong>estimate</strong> &mdash; set it to what you actually pay.
+          </p>
+          <label class="checkbox">
+            <input type="checkbox" id="shippingEnabled" checked />
+            <span>Include shipping in prices</span>
+          </label>
+          <label class="field">
+            <span>Shipping per order</span>
+            <input type="number" id="shippingPerOrder" min="0" max="100" step="0.01" value="1.29" />
+          </label>
+          <label class="field">
+            <span>Free over (blank = never)</span>
+            <input type="number" id="shippingFreeOver" min="0" step="0.01" value="5" />
+          </label>
+          <label class="field">
+            <span>Deck: separate orders</span>
+            <input type="number" id="shippingOrders" min="1" max="20" step="1" value="1" />
+          </label>
+        </div>
+      </details>
       <label class="control checkbox" title="Collector's Edition, gold-bordered World Championship decks and the 30th Anniversary Edition are official products but are not tournament-legal cards. They are hidden by default.">
         <input type="checkbox" id="includeCollectibles" />
         <span>Include collector-only printings</span>
@@ -45,6 +70,20 @@
 </nav>
 
 <main id="main" class="wrap">
+
+  <!-- ───────────────────────── Good deals ───────────────────────── -->
+  <section class="deals" id="deals" hidden aria-labelledby="deals-title">
+    <div class="deals-head">
+      <div>
+        <h2 id="deals-title">Good deals right now</h2>
+        <p class="panel-sub" id="deals-blurb"></p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-small" id="deals-refresh">Shuffle</button>
+    </div>
+    <div class="marquee" id="deals-marquee">
+      <div class="marquee-track" id="deals-track"></div>
+    </div>
+  </section>
 
   <!-- ───────────────────────── Single card ───────────────────────── -->
   <section id="panel-single" role="tabpanel" aria-labelledby="tab-single">

@@ -38,7 +38,36 @@ const state = {
   includeCollectibles: false,
   lastQuery: '',
   lastDeck: null,
+  shipping: { enabled: true, perOrder: 1.29, freeOver: 5, orders: 1 },
+  shippingDefaults: null,
+  dealTheme: null,
 };
+
+const SHIPPING_STORAGE_KEY = 'mtg-price-finder:shipping';
+
+/** Shipping settings a visitor edited are theirs; remember them locally. */
+function loadShippingSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SHIPPING_STORAGE_KEY) ?? 'null');
+    if (saved && typeof saved === 'object') Object.assign(state.shipping, saved);
+  } catch { /* private mode, blocked storage: fall back to defaults */ }
+}
+
+function saveShippingSettings() {
+  try {
+    localStorage.setItem(SHIPPING_STORAGE_KEY, JSON.stringify(state.shipping));
+  } catch { /* nothing to do; the session still works */ }
+}
+
+/** Shipping settings as query/body parameters. */
+function shippingParams() {
+  return {
+    shipping: String(state.shipping.enabled),
+    shippingPerOrder: String(state.shipping.perOrder),
+    shippingFreeOver: state.shipping.freeOver === null ? '' : String(state.shipping.freeOver),
+    orders: String(state.shipping.orders),
+  };
+}
 
 /* ── Tabs ──────────────────────────────────────────────────────────────── */
 function activateTab(which) {
@@ -56,12 +85,60 @@ $('#tab-deck').addEventListener('click', () => activateTab('deck'));
 /* ── Shared controls ───────────────────────────────────────────────────── */
 $('#currency').addEventListener('change', (event) => {
   state.currency = event.target.value;
+  // Each market has its own sensible shipping default, unless the visitor
+  // has already set their own.
+  const defaults = state.shippingDefaults?.[state.currency];
+  if (defaults && !localStorage.getItem(SHIPPING_STORAGE_KEY)) {
+    state.shipping.perOrder = defaults.perOrder;
+    state.shipping.freeOver = defaults.freeOver ?? null;
+  }
+  syncShippingInputs();
   refreshAll();
+  loadDeals();
 });
 $('#includeCollectibles').addEventListener('change', (event) => {
   state.includeCollectibles = event.target.checked;
   refreshAll();
 });
+
+const shippingInputs = {
+  enabled: $('#shippingEnabled'),
+  perOrder: $('#shippingPerOrder'),
+  freeOver: $('#shippingFreeOver'),
+  orders: $('#shippingOrders'),
+};
+
+function syncShippingInputs() {
+  shippingInputs.enabled.checked = state.shipping.enabled;
+  shippingInputs.perOrder.value = String(state.shipping.perOrder);
+  shippingInputs.freeOver.value = state.shipping.freeOver === null ? '' : String(state.shipping.freeOver);
+  shippingInputs.orders.value = String(state.shipping.orders);
+  for (const key of ['perOrder', 'freeOver', 'orders']) shippingInputs[key].disabled = !state.shipping.enabled;
+  $('#shipping-summary').textContent = state.shipping.enabled
+    ? `Shipping: ${money(state.shipping.perOrder, state.currency)}/order`
+    : 'Shipping: off';
+}
+
+function readShippingInputs() {
+  const number = (input, fallback) => {
+    const parsed = Number.parseFloat(input.value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+  state.shipping.enabled = shippingInputs.enabled.checked;
+  state.shipping.perOrder = number(shippingInputs.perOrder, 0);
+  state.shipping.freeOver = shippingInputs.freeOver.value.trim() === '' ? null : number(shippingInputs.freeOver, 0);
+  state.shipping.orders = Math.max(1, Math.round(number(shippingInputs.orders, 1)));
+  saveShippingSettings();
+  syncShippingInputs();
+}
+
+for (const input of Object.values(shippingInputs)) {
+  input.addEventListener('change', () => {
+    readShippingInputs();
+    refreshAll();
+    loadDeals();
+  });
+}
 
 function refreshAll() {
   if (state.lastQuery) runSingleSearch(state.lastQuery);
@@ -183,6 +260,7 @@ async function runSingleSearch(query) {
     q: query,
     currency: state.currency,
     includeCollectibles: String(state.includeCollectibles),
+    ...shippingParams(),
   });
 
   try {
@@ -275,7 +353,7 @@ function renderSingle({ card, pricing, links }) {
             ? `Cheapest ${offers.length} of ${pricing.totalOffers} priced printings`
             : `Every priced printing (${offers.length})`,
         }),
-        h('p', { class: 'panel-sub', text: priceSourceNote(pricing.currency) }),
+        h('p', { class: 'panel-sub', text: `${priceSourceNote(pricing.currency)}${pricing.shipping ? ' Shipping shown is your estimate, applied per order.' : ''}` }),
         h('div', { class: 'table-scroll' },
           h('table', {},
             h('thead', {}, h('tr', {},
@@ -328,12 +406,14 @@ function renderSingle({ card, pricing, links }) {
 }
 
 function cheapestBlock(offer, currency) {
+  const shipped = offer.shippingIsEstimate;
   return h('div', {},
-    h('p', { class: 'price-label', text: 'Cheapest genuine listing' }),
+    h('p', { class: 'price-label', text: shipped ? 'Cheapest genuine listing, delivered' : 'Cheapest genuine listing' }),
     h('div', { class: 'price-headline' },
-      h('span', { class: 'price-big', text: money(offer.price, currency) }),
+      h('span', { class: 'price-big', text: money(shipped ? offer.landedPrice : offer.price, currency) }),
       h('span', { class: 'muted', text: `on ${offer.vendorName}` }),
     ),
+    shipped ? h('p', { class: 'landed' }, shippingBreakdown(offer, currency)) : null,
     h('p', { class: 'price-detail', text:
       `${offer.finishLabel} · ${offer.printing.setName} (${offer.printing.set}) #${offer.printing.collectorNumber} · ${offer.printing.rarity}` }),
     h('div', { class: 'price-actions' },
@@ -341,6 +421,18 @@ function cheapestBlock(offer, currency) {
       h('a', { class: 'btn btn-ghost btn-small', href: offer.printing.scryfallUri, target: '_blank', rel: 'noopener noreferrer', text: 'Card details' }),
     ),
   );
+}
+
+/** "$1.20 card + $1.29 est. shipping" — always says which part is an estimate. */
+function shippingBreakdown(offer, currency) {
+  if (offer.shippingFree) {
+    return [
+      `${money(offer.price, currency)} card + `,
+      h('span', { class: 'ship-free', text: 'free shipping' }),
+      ' at this price',
+    ];
+  }
+  return `${money(offer.price, currency)} card + ${money(offer.shipping, currency)} estimated shipping`;
 }
 
 function noPriceBlock(currency) {
@@ -358,10 +450,17 @@ function priceSourceNote(currency) {
 
 function printingTile(offer, currency) {
   const p = offer.printing;
+  const shipped = offer.shippingIsEstimate;
   return h('a', { class: 'gallery-item', href: offer.url, target: '_blank', rel: 'noopener noreferrer' },
     cardImage(p, 'normal'),
     h('div', { class: 'gallery-body' },
-      h('span', { class: 'gallery-price', text: money(offer.price, currency) }),
+      h('span', { class: 'gallery-price', text: money(shipped ? offer.landedPrice : offer.price, currency) }),
+      shipped
+        ? h('span', { class: 'gallery-note' },
+            offer.shippingFree
+              ? h('span', { class: 'ship-free', text: 'ships free' })
+              : `${money(offer.price, currency)} + shipping`)
+        : null,
       h('span', { class: 'gallery-set', text: `${p.set} · #${p.collectorNumber}` }),
       h('span', { class: 'gallery-note', text: `${offer.finishLabel} · ${p.setName}` }),
     ),
@@ -381,7 +480,13 @@ function offerRow(offer, currency) {
     h('td', {}, h('div', {}, h('div', { text: p.setName }), h('div', { class: 'cell-card-sub', text: `${p.set} · ${p.releasedAt ?? ''}` }))),
     h('td', { text: offer.finishLabel }),
     h('td', { text: p.rarity ?? '' }),
-    h('td', { class: 'num price', text: money(offer.price, currency) }),
+    h('td', { class: 'num price' },
+      money(offer.shippingIsEstimate ? offer.landedPrice : offer.price, currency),
+      offer.shippingIsEstimate
+        ? h('span', { class: `landed${offer.shippingFree ? ' ship-free' : ''}`,
+            text: offer.shippingFree ? 'ships free' : `${money(offer.price, currency)} + ship` })
+        : null,
+    ),
     h('td', {}, h('a', { class: 'btn btn-ghost btn-small', href: offer.url, target: '_blank', rel: 'noopener noreferrer', text: offer.vendorName })),
   );
 }
@@ -495,6 +600,8 @@ async function runDeckSearch(list) {
         list,
         currency: state.currency,
         includeCollectibles: state.includeCollectibles,
+        ...shippingParams(),
+        shipping: state.shipping.enabled,
       }),
     });
     setStatus('#deck-status', '');
@@ -513,12 +620,15 @@ function renderDeck(data) {
       h('h2', { text: 'Deck total at the cheapest genuine printing of each card' }),
       h('p', { class: 'panel-sub', text: priceSourceNote(currency) }),
       h('dl', { class: 'summary-grid' },
-        summaryCard('Cheapest total', money(totals.total, currency), 'total'),
+        summaryCard(totals.shipping ? 'Total delivered' : 'Cheapest total', money(totals.total, currency), 'total'),
+        totals.shipping ? summaryCard('Cards subtotal', money(totals.cardsSubtotal, currency)) : null,
+        totals.shipping ? summaryCard('Shipping (est.)', money(totals.shipping.estimate, currency), totals.shipping.estimate > 0 ? 'warn' : '') : null,
         summaryCard('Cards', String(totals.cardCount)),
         summaryCard('Distinct cards', String(totals.distinctCards)),
         totals.unpricedCards > 0 ? summaryCard('Unpriced', String(totals.unpricedCards), 'warn') : null,
         missing.length > 0 ? summaryCard('Not found', String(missing.length), 'warn') : null,
       ),
+      totals.shipping ? h('p', { class: 'muted', text: shippingExplanation(totals.shipping, currency) }) : null,
       totals.bySection.length > 1
         ? h('p', { class: 'muted', text: totals.bySection.map((s) => `${s.section}: ${money(s.total, currency)} (${s.cards} cards)`).join('  ·  ') })
         : null,
@@ -605,6 +715,18 @@ function renderDeck(data) {
   }
 
   $('#deck-results').replaceChildren(...sections);
+}
+
+/** Spell out exactly how the shipping estimate was reached. */
+function shippingExplanation(shipping, currency) {
+  const orders = shipping.orders ?? 1;
+  const perOrder = money(shipping.perOrder, currency);
+  const split = orders === 1 ? 'one order' : `${orders} separate orders`;
+  if (shipping.estimate === 0 && shipping.freeOver !== null) {
+    return `Estimated as ${split} at ${perOrder} each — waived here because each order clears the ${money(shipping.freeOver, currency)} free-shipping threshold. Change it under Shipping.`;
+  }
+  const threshold = shipping.freeOver !== null ? `, free over ${money(shipping.freeOver, currency)} per order` : '';
+  return `Estimated as ${split} at ${perOrder} each${threshold}. A real deck order usually spans a few sellers — raise "separate orders" under Shipping to match. eBay listings use their own real shipping cost.`;
 }
 
 function summaryCard(label, value, variant = '') {
@@ -700,10 +822,102 @@ function downloadCsv(cards, currency) {
   URL.revokeObjectURL(url);
 }
 
+/* ── Good deals ────────────────────────────────────────────────────────── */
+const dealsSection = $('#deals');
+const dealsTrack = $('#deals-track');
+
+$('#deals-refresh').addEventListener('click', () => loadDeals({ reshuffle: true }));
+
+async function loadDeals({ reshuffle = false } = {}) {
+  const params = new URLSearchParams({
+    currency: state.currency,
+    includeCollectibles: String(state.includeCollectibles),
+    limit: '16',
+    ...shippingParams(),
+  });
+  // Keep the same theme when only a setting changed; pick a new one on Shuffle.
+  if (state.dealTheme && !reshuffle) params.set('theme', state.dealTheme);
+
+  try {
+    const { theme, deals } = await getJson(`/api/deals?${params.toString()}`);
+    if (!deals || deals.length === 0) {
+      dealsSection.hidden = true;
+      return;
+    }
+    state.dealTheme = theme.id;
+    $('#deals-title').textContent = theme.label;
+    $('#deals-blurb').textContent = theme.blurb;
+    renderDeals(deals);
+    dealsSection.hidden = false;
+  } catch {
+    // A deals outage is not worth an error message; the rest of the page works.
+    dealsSection.hidden = true;
+  }
+}
+
+function renderDeals(deals) {
+  const tiles = deals.map((deal) => dealTile(deal));
+  // A second copy makes the loop seamless; it is hidden from assistive tech
+  // and from the reduced-motion layout.
+  const clones = deals.map((deal) => {
+    const clone = dealTile(deal);
+    clone.dataset.clone = 'true';
+    clone.setAttribute('aria-hidden', 'true');
+    for (const node of clone.querySelectorAll('button, a')) node.setAttribute('tabindex', '-1');
+    return clone;
+  });
+  dealsTrack.replaceChildren(...tiles, ...clones);
+  // Roughly constant speed regardless of how many tiles there are.
+  dealsTrack.style.setProperty('--marquee-duration', `${Math.max(30, deals.length * 5)}s`);
+}
+
+function dealTile(deal) {
+  const offer = deal.offer;
+  const shipped = offer.shippingIsEstimate;
+  const img = h('img', { alt: `${deal.name} — ${offer.printing.setName}`, loading: 'lazy', decoding: 'async' });
+  const src = deal.images?.normal ?? deal.images?.small;
+  if (src) img.src = src;
+
+  return h('article', { class: 'deal-tile' },
+    img,
+    h('div', { class: 'deal-body' },
+      h('span', { class: 'deal-price', text: money(shipped ? offer.landedPrice : offer.price, deal.offer.currency) }),
+      shipped && !offer.shippingFree
+        ? h('span', { class: 'deal-meta', text: `${money(offer.price, offer.currency)} + shipping` })
+        : shipped
+          ? h('span', { class: 'deal-meta ship-free', text: 'ships free' })
+          : null,
+      h('span', { class: 'deal-name', text: deal.name }),
+      h('span', { class: 'deal-meta', text: `${offer.printing.set} · ${offer.finishLabel}` }),
+      deal.savingsPercent
+        ? h('span', { class: 'deal-save', text: `${deal.savingsPercent}% under the ${money(deal.dearestPrice, offer.currency)} printing` })
+        : null,
+      h('div', { class: 'deal-actions' },
+        h('button', {
+          class: 'btn-link', type: 'button', text: 'Compare',
+          onclick: () => {
+            activateTab('single');
+            queryInput.value = deal.name;
+            runSingleSearch(deal.name);
+            document.getElementById('single-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          },
+        }),
+        h('a', {
+          class: 'btn-link', href: offer.url, target: '_blank', rel: 'noopener noreferrer',
+          title: `Buy on ${offer.vendorName}`, text: 'Buy →',
+        }),
+      ),
+    ),
+  );
+}
+
 /* ── Boot ──────────────────────────────────────────────────────────────── */
 (async function boot() {
+  loadShippingSettings();
+  syncShippingInputs();
   try {
     const health = await getJson('/api/health');
+    state.shippingDefaults = health.shipping ?? null;
     const ebay = health.liveListings?.ebay
       ? 'Live eBay listings enabled.'
       : 'Live eBay listings are off — add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to show real listing photos and prices.';
@@ -711,5 +925,6 @@ function downloadCsv(cards, currency) {
   } catch {
     $('#footer-status').textContent = '';
   }
+  loadDeals();
   queryInput.focus();
 })();
