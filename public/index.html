@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MTG Price Finder — cheapest genuine listings</title>
+<meta name="description" content="Search any Magic: The Gathering card or paste a whole deck list and find the cheapest genuine listing across TCGplayer, Cardmarket, eBay and other reputable stores. No proxies." />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1420'/%3E%3Cpath d='M8 23V9l8 6 8-6v14' stroke='%23f0b23c' stroke-width='2.5' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="7" fill="#161d2d"/><path d="M8 23V9l8 6 8-6v14" stroke="#f0b23c" stroke-width="2.5" fill="none" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="brand-text">
+        <strong>MTG Price Finder</strong>
+        <small>Cheapest genuine listings — no proxies, no fakes</small>
+      </span>
+    </div>
+
+    <div class="header-controls">
+      <label class="control">
+        <span>Market</span>
+        <select id="currency">
+          <option value="USD">USD · TCGplayer</option>
+          <option value="EUR">EUR · Cardmarket</option>
+        </select>
+      </label>
+      <label class="control checkbox" title="Collector's Edition, gold-bordered World Championship decks and the 30th Anniversary Edition are official products but are not tournament-legal cards. They are hidden by default.">
+        <input type="checkbox" id="includeCollectibles" />
+        <span>Include collector-only printings</span>
+      </label>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs wrap" aria-label="Search mode">
+  <button class="tab is-active" id="tab-single" role="tab" aria-selected="true" aria-controls="panel-single">Single card</button>
+  <button class="tab" id="tab-deck" role="tab" aria-selected="false" aria-controls="panel-deck">Deck list</button>
+</nav>
+
+<main id="main" class="wrap">
+
+  <!-- ───────────────────────── Single card ───────────────────────── -->
+  <section id="panel-single" role="tabpanel" aria-labelledby="tab-single">
+    <form class="search-bar" id="single-form" autocomplete="off">
+      <div class="search-field">
+        <label class="visually-hidden" for="card-query">Card name</label>
+        <input
+          id="card-query"
+          type="search"
+          placeholder="Search any Magic card — e.g. Ragavan, Nimble Pilferer"
+          aria-describedby="search-hint"
+          role="combobox"
+          aria-expanded="false"
+          aria-controls="suggestions"
+          aria-autocomplete="list" />
+        <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+      </div>
+      <button type="submit" class="btn btn-primary">Find cheapest</button>
+    </form>
+    <p id="search-hint" class="hint">Misspellings are fine. Every price below is for a real, tournament-legal printing.</p>
+
+    <div id="single-status" class="status" role="status" aria-live="polite"></div>
+    <div id="single-results" class="results"></div>
+  </section>
+
+  <!-- ───────────────────────── Deck list ───────────────────────── -->
+  <section id="panel-deck" role="tabpanel" aria-labelledby="tab-deck" hidden>
+    <form class="deck-form" id="deck-form">
+      <label class="visually-hidden" for="deck-input">Deck list</label>
+      <textarea
+        id="deck-input"
+        rows="12"
+        spellcheck="false"
+        placeholder="Paste a deck list — Arena, MTGO, Moxfield, Archidekt, TappedOut and plain &quot;4 Lightning Bolt&quot; all work.&#10;&#10;Deck&#10;4 Lightning Bolt&#10;4 Ragavan, Nimble Pilferer (MH2) 138&#10;2 Fire // Ice&#10;&#10;Sideboard&#10;2 Pyroblast"></textarea>
+      <div class="deck-actions">
+        <button type="submit" class="btn btn-primary">Price this deck</button>
+        <button type="button" class="btn btn-ghost" id="deck-sample">Load example</button>
+        <label class="btn btn-ghost file-btn">
+          Upload .txt
+          <input type="file" id="deck-file" accept=".txt,.dec,.mwdeck,text/plain" hidden />
+        </label>
+        <button type="button" class="btn btn-ghost" id="deck-clear">Clear</button>
+      </div>
+    </form>
+
+    <div id="deck-status" class="status" role="status" aria-live="polite"></div>
+    <div id="deck-results" class="results"></div>
+  </section>
+</main>
+
+<footer class="site-footer wrap">
+  <p>
+    Prices come from <a href="https://scryfall.com/docs/api" rel="noopener noreferrer" target="_blank">Scryfall</a>,
+    which aggregates daily TCGplayer (USD) and Cardmarket (EUR) data. Card images and card data are © Wizards of the Coast;
+    this site is unofficial Fan Content and is not affiliated with or endorsed by Wizards of the Coast.
+  </p>
+  <p id="footer-status" class="muted"></p>
+</footer>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>
