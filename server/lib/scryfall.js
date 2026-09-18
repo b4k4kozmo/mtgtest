@@ -29,12 +29,16 @@ export function createScryfallClient({
   minIntervalMs = MIN_INTERVAL_MS,
   contact = globalThis.process?.env?.SCRYFALL_CONTACT || 'https://github.com/b4k4kozmo/mtgtest',
   maxRetries = 3,
+  // Browsers forbid setting User-Agent and treat this Accept value as unsafe,
+  // which forces a CORS preflight on every read. The static build passes {} so
+  // its GETs stay simple requests.
+  headers: headerOverride = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new TypeError('A fetch implementation is required.');
   }
 
-  const headers = {
+  const headers = headerOverride ?? {
     // Scryfall rejects generic/absent user agents.
     'User-Agent': `MTGPriceFinder/1.0 (+${contact})`,
     Accept: 'application/json;q=0.9,*/*;q=0.8',

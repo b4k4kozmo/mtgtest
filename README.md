@@ -42,17 +42,35 @@ No proxies. No counterfeits. No custom cards.
 
 ## Quick start
 
+Two ways to run it, both with live prices for every card ever printed.
+
+**With the server** — adds live eBay listings when you supply credentials:
+
 ```bash
 npm install
 npm start
 # http://localhost:3000
 ```
 
+**With no backend at all** — Scryfall serves `Access-Control-Allow-Origin: *`,
+so the whole app runs as a static site straight from your browser:
+
+```bash
+npm install
+npm run serve:static     # builds dist/ and serves it on :8080
+# or: npm run build:static && npx serve dist
+```
+
+`dist/` is plain ES modules — the same files you can read in `server/lib/` — so
+it drops onto GitHub Pages, S3 or any static host unchanged. The only feature it
+gives up is eBay: that needs an OAuth client secret, which has no safe home in a
+page anyone can view, so it falls back to pre-filtered eBay search links.
+
 Node 20+ is required. The app has one runtime dependency (Express); everything
 else is standard library.
 
 ```bash
-npm test     # 119 tests, no network access needed
+npm test     # 129 tests, no network access needed
 ```
 
 ---
@@ -218,6 +236,10 @@ the page.
 | `GET /api/listings?name=&set=&limit=` | Screened live marketplace listings |
 | `POST /api/deck` | `{ list, currency, includeCollectibles }` → priced deck |
 
+`public/app.js` never fetches a URL itself — it calls `./api.js`. Swapping that
+one module is what turns the server build into the static build, so both run the
+identical front end and the identical pricing modules.
+
 Every pricing endpoint also accepts `shipping` (`true`/`false`),
 `shippingPerOrder`, `shippingFreeOver` (blank for none) and `orders`.
 
@@ -241,8 +263,14 @@ server/
     ebay.js              optional Browse API adapter
     cache.js             TTL cache with in-flight de-duplication
   routes/api.js          HTTP surface
-public/                  the front end (no build step, no framework)
-test/                    119 tests against Scryfall-shaped fixtures
+public/
+  index.html             the page
+  styles.css             the styles
+  app.js                 the front end — transport-agnostic, no framework
+  api.js                 transport: this app's own HTTP API
+web/api-direct.js        transport: Scryfall straight from the browser
+scripts/build-static.mjs assembles dist/ for the backend-free build
+test/                    129 tests against Scryfall-shaped fixtures
 ```
 
 ---

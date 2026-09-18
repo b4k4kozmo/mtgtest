@@ -1,6 +1,10 @@
 /* MTG Price Finder — front end.
    Everything is built with DOM nodes rather than innerHTML: some of the text
-   rendered here (marketplace listing titles) is written by strangers. */
+   rendered here (marketplace listing titles) is written by strangers.
+
+   Data access goes through ./api.js and nothing else, so this same file drives
+   both the server build and the backend-free static build. */
+import * as api from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -145,11 +149,13 @@ function refreshAll() {
   if (state.lastDeck) runDeckSearch(state.lastDeck);
 }
 
-async function getJson(url, options) {
-  const response = await fetch(url, options);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
-  return payload;
+/** Normalises whatever the transport throws into a message the UI can show. */
+async function call(fn, args) {
+  try {
+    return await fn(args);
+  } catch (err) {
+    throw new Error(err?.message || 'Request failed.');
+  }
 }
 
 function setStatus(target, message, { error = false, loading = false } = {}) {
@@ -173,7 +179,7 @@ queryInput.addEventListener('input', () => {
   if (value.length < 2) return closeSuggestions();
   autocompleteTimer = setTimeout(async () => {
     try {
-      const { names } = await getJson(`/api/autocomplete?q=${encodeURIComponent(value)}`);
+      const { names } = await call(api.autocomplete, { q: value });
       renderSuggestions(names);
     } catch {
       closeSuggestions();
@@ -256,15 +262,15 @@ async function runSingleSearch(query) {
   setStatus('#single-status', `Searching for “${query}”…`, { loading: true });
   $('#single-results').replaceChildren(skeletonHero());
 
-  const params = new URLSearchParams({
+  const params = {
     q: query,
     currency: state.currency,
     includeCollectibles: String(state.includeCollectibles),
     ...shippingParams(),
-  });
+  };
 
   try {
-    const data = await getJson(`/api/card?${params.toString()}`);
+    const data = await call(api.card, params);
     setStatus('#single-status', '');
     renderSingle(data);
     loadLiveListings(data);
@@ -277,7 +283,7 @@ async function runSingleSearch(query) {
 
 async function suggestAlternatives(query) {
   try {
-    const { cards } = await getJson(`/api/search?q=${encodeURIComponent(query)}&limit=12`);
+    const { cards } = await call(api.search, { q: query, limit: 12 });
     if (cards.length === 0) return;
     $('#single-results').replaceChildren(
       h('section', { class: 'panel' },
@@ -521,8 +527,7 @@ async function loadLiveListings({ card, liveListings }) {
   const mount = document.getElementById('live-listings');
   if (!mount || !liveListings?.ebay) return;
   try {
-    const params = new URLSearchParams({ name: card.name, limit: '8' });
-    const { listings, error } = await getJson(`/api/listings?${params.toString()}`);
+    const { listings, error } = await call(api.listings, { name: card.name, limit: 8 });
     if (error || listings.length === 0) return;
     mount.replaceChildren(
       h('h2', { text: 'Live eBay listings near the cheapest price' }),
@@ -593,16 +598,12 @@ async function runDeckSearch(list) {
   setStatus('#deck-status', 'Looking up every card and finding the cheapest genuine printing…', { loading: true });
   $('#deck-results').replaceChildren();
   try {
-    const data = await getJson('/api/deck', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        list,
-        currency: state.currency,
-        includeCollectibles: state.includeCollectibles,
-        ...shippingParams(),
-        shipping: state.shipping.enabled,
-      }),
+    const data = await call(api.deck, {
+      list,
+      currency: state.currency,
+      includeCollectibles: state.includeCollectibles,
+      ...shippingParams(),
+      shipping: state.shipping.enabled,
     });
     setStatus('#deck-status', '');
     renderDeck(data);
@@ -829,17 +830,17 @@ const dealsTrack = $('#deals-track');
 $('#deals-refresh').addEventListener('click', () => loadDeals({ reshuffle: true }));
 
 async function loadDeals({ reshuffle = false } = {}) {
-  const params = new URLSearchParams({
+  const params = {
     currency: state.currency,
     includeCollectibles: String(state.includeCollectibles),
     limit: '16',
     ...shippingParams(),
-  });
+  };
   // Keep the same theme when only a setting changed; pick a new one on Shuffle.
-  if (state.dealTheme && !reshuffle) params.set('theme', state.dealTheme);
+  if (state.dealTheme && !reshuffle) params.theme = state.dealTheme;
 
   try {
-    const { theme, deals } = await getJson(`/api/deals?${params.toString()}`);
+    const { theme, deals } = await call(api.deals, params);
     if (!deals || deals.length === 0) {
       dealsSection.hidden = true;
       return;
@@ -916,7 +917,7 @@ function dealTile(deal) {
   loadShippingSettings();
   syncShippingInputs();
   try {
-    const health = await getJson('/api/health');
+    const health = await call(api.health, undefined);
     state.shippingDefaults = health.shipping ?? null;
     const ebay = health.liveListings?.ebay
       ? 'Live eBay listings enabled.'
