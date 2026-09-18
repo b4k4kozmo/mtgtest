@@ -27,7 +27,7 @@ export function createScryfallClient({
   fetchImpl = globalThis.fetch,
   cache = new TtlCache({ ttlMs: 6 * 60 * 60 * 1000 }),
   minIntervalMs = MIN_INTERVAL_MS,
-  contact = process.env.SCRYFALL_CONTACT || 'https://github.com/b4k4kozmo/mtgtest',
+  contact = globalThis.process?.env?.SCRYFALL_CONTACT || 'https://github.com/b4k4kozmo/mtgtest',
   maxRetries = 3,
 } = {}) {
   if (typeof fetchImpl !== 'function') {

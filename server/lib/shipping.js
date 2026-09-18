@@ -25,10 +25,13 @@ export const DEFAULT_SHIPPING = {
 const MAX_PER_ORDER = 100;
 const MAX_ORDERS = 20;
 
+/** Env lookup that also works in a browser, where `process` does not exist. */
+const env = (name) => globalThis.process?.env?.[name];
+
 export function defaultShippingFor(currency) {
   const base = DEFAULT_SHIPPING[currency] ?? DEFAULT_SHIPPING.USD;
-  const envPerOrder = Number.parseFloat(process.env[`SHIPPING_PER_ORDER_${currency}`]);
-  const envFreeOver = Number.parseFloat(process.env[`SHIPPING_FREE_OVER_${currency}`]);
+  const envPerOrder = Number.parseFloat(env(`SHIPPING_PER_ORDER_${currency}`));
+  const envFreeOver = Number.parseFloat(env(`SHIPPING_FREE_OVER_${currency}`));
   return {
     perOrder: Number.isFinite(envPerOrder) ? envPerOrder : base.perOrder,
     freeOver: Number.isFinite(envFreeOver) ? envFreeOver : base.freeOver,
