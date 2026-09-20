@@ -66,10 +66,10 @@ it drops onto GitHub Pages, S3 or any static host unchanged. The only feature it
 gives up is eBay: that needs an OAuth client secret, which has no safe home in a
 page anyone can view, so it falls back to pre-filtered eBay search links.
 
-**Publish it.** `.github/workflows/pages.yml` builds and deploys `dist/` on every
-push. It needs one setting flipped once: repository **Settings → Pages → Source:
-"GitHub Actions"**. After that the site is live on a public URL with every card
-Scryfall knows about — including the newest sets — and updates itself on push.
+**Publish it.** `.github/workflows/pages.yml` runs the tests, builds `dist/` and
+deploys it to GitHub Pages on every push, switching Pages on for the repository
+itself the first time it runs. The result is a public URL carrying every card
+Scryfall knows about — including the newest sets — that updates itself on push.
 
 Node 20+ is required. The app has one runtime dependency (Express); everything
 else is standard library.
