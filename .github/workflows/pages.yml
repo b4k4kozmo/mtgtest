@@ -5,8 +5,14 @@
 # feed. No server, because Scryfall allows cross-origin reads straight from the
 # browser.
 #
-# Pages is switched on by the configure-pages step below, so there is no manual
-# setup: the first successful run publishes the site.
+# ONE-TIME SETUP: repository Settings -> Pages -> Source: "GitHub Actions".
+# The workflow cannot do this for you. Actions' built-in GITHUB_TOKEN can deploy
+# to an existing Pages site but is not allowed to create one, so
+# `configure-pages` with `enablement: true` fails with "Resource not accessible
+# by integration". Flipping that one setting is the whole setup.
+#
+# Until then the build job still runs green — tests and the static build are
+# independent of Pages — and only `deploy` goes red.
 name: Deploy to GitHub Pages
 
 on:
@@ -36,11 +42,10 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:static
-      - uses: actions/configure-pages@v5
-        # Turns Pages on for the repo if it is not already, so a fresh clone of
-        # this project deploys without anyone visiting the settings page.
-        with:
-          enablement: true
+      # No `configure-pages` here: its only job is handing a base path to site
+      # generators, and this build uses relative paths so it works from any
+      # subpath already. Keeping it out of this job means a Pages misconfiguration
+      # cannot mask a genuine test or build failure.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
